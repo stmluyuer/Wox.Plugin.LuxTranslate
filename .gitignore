@@ -39,3 +39,5 @@ temp/
 # Wox local runtime data
 .wox/
 wox-user/
+
+package-lock.json

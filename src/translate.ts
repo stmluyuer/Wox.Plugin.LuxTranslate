@@ -323,8 +323,15 @@ export function parseTranslationQuery(search: string, defaultProvider: Translati
     }
   }
 
-  // 3. 剩余部分为待翻译文本
-  const text = words.slice(idx).join(" ").trim()
+  // 3. 从原始字符串中提取剩余文本（保留换行），而不是 split+join
+  let textStart = 0
+  for (let i = 0; i < idx; i++) {
+    const match = trimmed.slice(textStart).match(/^[^\s]+\s*/)
+    if (match) {
+      textStart += match[0].length
+    }
+  }
+  const text = trimmed.slice(textStart).trim()
 
   return { provider, text, forcedProvider, targetLanguage, sourceLanguage }
 }
@@ -474,6 +481,234 @@ export async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs
     return await fetch(url, { ...init, signal: controller.signal })
   } finally {
     clearTimeout(timeout)
+  }
+}
+
+async function* readChunksWithTimeout(body: ReadableStream<Uint8Array>, timeoutMs: number): AsyncGenerator<Uint8Array> {
+  const reader = body.getReader()
+  try {
+    while (true) {
+      let timer: ReturnType<typeof setTimeout>
+      const result = await Promise.race([
+        reader.read(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            reject(new Error(`Stream read timed out after ${timeoutMs}ms`))
+          }, timeoutMs)
+        })
+      ]).finally(() => clearTimeout(timer!))
+      if (result.done) break
+      yield result.value!
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined)
+    reader.releaseLock()
+  }
+}
+
+function parseSSEData(data: string): Record<string, unknown> | undefined {
+  try {
+    return JSON.parse(data) as Record<string, unknown>
+  } catch {
+    return undefined
+  }
+}
+
+async function parseOpenAISSEStream(chunks: AsyncGenerator<Uint8Array>, onToken: StreamCallbacks["onToken"], providerName: string): Promise<string> {
+  const decoder = new TextDecoder()
+  let buffer = ""
+  let fullText = ""
+  const consumeData = async (data: string) => {
+    if (!data || data === "[DONE]") return
+    const json = parseSSEData(data)
+    if (!json) return
+    const choices = json.choices as Array<{ delta?: { content?: string }; finish_reason?: string | null }> | undefined
+    if (json.error || choices?.[0]?.finish_reason === "error") {
+      const error = json.error as { message?: string } | string | undefined
+      const message = typeof error === "string" ? error : error?.message || data
+      throw new Error(`${providerName} returned an error: ${message}`)
+    }
+    const token = choices?.[0]?.delta?.content
+    if (token) {
+      fullText += token
+      await onToken(token)
+    }
+  }
+
+  for await (const chunk of chunks) {
+    buffer += decoder.decode(chunk, { stream: true })
+    const lines = buffer.split("\n")
+    buffer = lines.pop() || ""
+
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (!trimmed || !trimmed.startsWith("data:")) continue
+      await consumeData(trimmed.slice(5).trim())
+    }
+  }
+
+  const remaining = buffer.trim()
+  if (remaining && remaining.startsWith("data:")) {
+    await consumeData(remaining.slice(5).trim())
+  }
+
+  if (fullText === "") {
+    throw new Error(`${providerName} provider returned an empty translation.`)
+  }
+
+  return fullText
+}
+
+async function parseClaudeSSEStream(chunks: AsyncGenerator<Uint8Array>, onToken: StreamCallbacks["onToken"]): Promise<string> {
+  const decoder = new TextDecoder()
+  let buffer = ""
+  let fullText = ""
+  let errorText: string | null = null
+
+  for await (const chunk of chunks) {
+    buffer += decoder.decode(chunk, { stream: true })
+    const events = buffer.split("\n\n")
+    buffer = events.pop() || ""
+
+    for (const event of events) {
+      let dataLine = ""
+
+      for (const line of event.split("\n")) {
+        const trimmed = line.trim()
+        if (trimmed.startsWith("data:")) {
+          dataLine = trimmed.slice(5).trim()
+        }
+      }
+
+      if (!dataLine) continue
+
+      const json = parseSSEData(dataLine)
+      if (json) {
+        const type = json.type as string | undefined
+
+        if (type === "content_block_delta") {
+          const delta = json.delta as { type?: string; text?: string } | undefined
+          if (delta?.type === "text_delta" && delta.text) {
+            fullText += delta.text
+            await onToken(delta.text)
+          }
+        } else if (type === "error") {
+          const err = json.error as { message?: string } | undefined
+          errorText = err?.message || dataLine
+        }
+      }
+    }
+  }
+
+  // process trailing partial event
+  const trimmedRemaining = buffer.trim()
+  if (trimmedRemaining) {
+    for (const line of trimmedRemaining.split("\n")) {
+      const trimmed = line.trim()
+      if (trimmed.startsWith("data:")) {
+        const dataLine = trimmed.slice(5).trim()
+        if (dataLine) {
+          const json = parseSSEData(dataLine)
+          if (json) {
+            const delta = (json as { delta?: { type?: string; text?: string } }).delta
+            if (delta?.type === "text_delta" && delta.text) {
+              fullText += delta.text
+              await onToken(delta.text)
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (errorText) {
+    throw new Error(`Claude provider returned an error: ${errorText}`)
+  }
+  if (fullText === "") {
+    throw new Error("Claude provider returned an empty translation.")
+  }
+
+  return fullText
+}
+
+export interface StreamCallbacks {
+  onToken: (token: string) => void | Promise<void>
+  onComplete: (fullText: string) => void | Promise<void>
+  onError: (error: Error) => void | Promise<void>
+}
+
+export async function translateWithOpenAICompatibleStream(request: TranslationRequest, providerName: string, callbacks: StreamCallbacks): Promise<void> {
+  try {
+    const baseUrl = request.settings.openaiBaseUrl.replace(/\/+$/, "")
+    const response = await fetchWithTimeout(
+      `${baseUrl}/chat/completions`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${request.settings.openaiApiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model: request.settings.openaiModel,
+          messages: buildTranslationPrompt(request.text, request.direction.targetLabel).map(conversation => ({
+            role: conversation.Role,
+            content: conversation.Text
+          })),
+          temperature: 0.1,
+          stream: true
+        })
+      },
+      request.settings.requestTimeoutMs
+    )
+
+    if (!response.ok || !response.body) {
+      const bodyText = response.ok ? "" : await response.text().catch(() => "")
+      throw new Error(`${providerName} request failed with ${response.status}: ${bodyText}`)
+    }
+
+    const chunks = readChunksWithTimeout(response.body, request.settings.requestTimeoutMs)
+    const fullText = await parseOpenAISSEStream(chunks, callbacks.onToken, providerName)
+    await callbacks.onComplete(fullText)
+  } catch (error) {
+    await callbacks.onError(error instanceof Error ? error : new Error(String(error)))
+  }
+}
+
+export async function translateWithClaudeStream(request: TranslationRequest, callbacks: StreamCallbacks): Promise<void> {
+  try {
+    const baseUrl = request.settings.openaiBaseUrl.replace(/\/+$/, "")
+    const conversations = buildTranslationPrompt(request.text, request.direction.targetLabel)
+    const response = await fetchWithTimeout(
+      `${baseUrl}/messages`,
+      {
+        method: "POST",
+        headers: {
+          "x-api-key": request.settings.openaiApiKey,
+          "anthropic-version": "2023-06-01",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model: request.settings.openaiModel,
+          system: conversations[0].Text,
+          messages: [{ role: "user", content: conversations[1].Text }],
+          max_tokens: 2048,
+          temperature: 0.1,
+          stream: true
+        })
+      },
+      request.settings.requestTimeoutMs
+    )
+
+    if (!response.ok || !response.body) {
+      const bodyText = response.ok ? "" : await response.text().catch(() => "")
+      throw new Error(`Claude request failed with ${response.status}: ${bodyText}`)
+    }
+
+    const chunks = readChunksWithTimeout(response.body, request.settings.requestTimeoutMs)
+    const fullText = await parseClaudeSSEStream(chunks, callbacks.onToken)
+    await callbacks.onComplete(fullText)
+  } catch (error) {
+    await callbacks.onError(error instanceof Error ? error : new Error(String(error)))
   }
 }
 
@@ -777,7 +1012,7 @@ function buildTranslationPrompt(text: string, targetLabel: string): TranslationP
   return [
     {
       Role: "system",
-      Text: `Translate the user's text into ${targetLabel}. Return only the translation. Preserve code blocks, URLs, numbers, and proper nouns when appropriate. Do not add explanations.`,
+      Text: `Translate the user's text into ${targetLabel}. Return only the translation. Preserve code blocks, URLs, numbers, proper nouns, and the original line breaks and paragraph structure when appropriate. Multiple consecutive blank lines in the source should become a single line break in the translation. Do not add explanations.`,
       Timestamp: now
     },
     {
@@ -786,6 +1021,10 @@ function buildTranslationPrompt(text: string, targetLabel: string): TranslationP
       Timestamp: now
     }
   ]
+}
+
+export function collapseExtraBlankLines(text: string): string {
+  return text.replace(/\n{3,}/g, "\n")
 }
 
 export async function translateWithOpenAICompatible(request: TranslationRequest, providerName = "OpenAI compatible"): Promise<TranslationResponse> {
