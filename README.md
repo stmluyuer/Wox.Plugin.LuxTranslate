@@ -31,6 +31,10 @@ Wox v2.4.7 + LuxTranslate v0.1.4 的 10 秒演示：输入两句相关的英文�
 - 按需显示或隐藏预览中的原文、翻译源和语言方向。
 - 设置页按翻译源类型分组，API Key、Base URL 和模型可在表格行编辑中配置。
 
+## 0.1.7 模型参数
+
+在大模型表格中编辑具体配置，可设置温度、推理强度和超时。温度留空、推理强度选择“模型默认”时不发送对应参数，避免强制温度导致部分模型返回 HTTP 400。推理强度仅用于 OpenAI / 兼容接口，具体值须由模型支持；Claude 和 DeepSeek 请保持模型默认。`none` 表示明确关闭推理，与模型默认不同。超时以毫秒计，留空沿用全局设置；推理较慢可填写 `120000`。修改这些参数会使该配置的旧翻译缓存失效。
+
 ## 翻译源
 
 可以使用免配置翻译源，也可以接入大模型：
@@ -50,9 +54,9 @@ Wox v2.4.7 + LuxTranslate v0.1.4 的 10 秒演示：输入两句相关的英文�
 
 ## 安装
 
-需要 **Wox 2.4.8 或更高版本**。在 Wox 的插件商店搜索 **LuxTranslate** 安装，也可以从 [GitHub Releases](https://github.com/stmluyuer/Wox.Plugin.LuxTranslate/releases/latest) 下载 `wox.plugin.luxtranslate.wox`，在 Wox 中打开安装。当前发布版为 [v0.1.6](https://github.com/stmluyuer/Wox.Plugin.LuxTranslate/releases/tag/v0.1.6)。
+需要 **Wox 2.4.8 或更高版本**。在 Wox 的插件商店搜索 **LuxTranslate** 安装，也可以从 [GitHub Releases](https://github.com/stmluyuer/Wox.Plugin.LuxTranslate/releases/latest) 下载 `wox.plugin.luxtranslate.wox`，在 Wox 中打开安装。当前发布版为 [v0.1.7](https://github.com/stmluyuer/Wox.Plugin.LuxTranslate/releases/tag/v0.1.7)。
 
-从源码构建（当前版本为 0.1.6）：
+从源码构建（当前版本为 0.1.7）：
 
 ```bash
 git clone https://github.com/stmluyuer/Wox.Plugin.LuxTranslate.git

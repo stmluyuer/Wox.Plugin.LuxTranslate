@@ -56,6 +56,8 @@ export interface PluginSettings {
   openaiBaseUrl: string
   openaiApiKey: string
   openaiModel: string
+  temperature?: string
+  reasoningEffort?: string
   requestTimeoutMs: number
   showPreviewDetails: boolean
   enableSpeechPlayback: boolean
@@ -115,6 +117,9 @@ export interface ProviderTableRow {
   apiKey?: string
   baseUrl?: string
   model?: string
+  temperature?: string
+  reasoningEffort?: string
+  requestTimeoutMs?: string
 }
 
 const PROVIDER_ALIASES: Record<string, TranslationProvider> = {
@@ -298,7 +303,18 @@ export function translationConfigurationKey(provider: TranslationProvider, setti
   // Model, endpoint, and account changes must not reuse another configuration's translation.
   // Hash the inputs so history never stores a second copy of the credential.
   return createHash("sha256")
-    .update(JSON.stringify([provider, settings.openaiBaseUrl.replace(/\/+$/, ""), settings.openaiModel, settings.openaiApiKey, settings.sourceId]))
+    .update(
+      JSON.stringify([
+        provider,
+        settings.openaiBaseUrl.replace(/\/+$/, ""),
+        settings.openaiModel,
+        settings.openaiApiKey,
+        settings.sourceId,
+        settings.temperature,
+        settings.reasoningEffort,
+        settings.requestTimeoutMs
+      ])
+    )
     .digest("hex")
 }
 
@@ -523,6 +539,31 @@ export function getMissingConfiguration(provider: TranslationProvider, settings:
   if (["openai", "claude", "deepseek", "llm_custom", "openai_compatible"].includes(provider) && settings.openaiModel.trim() === "") {
     return "Model is required for this large language model provider."
   }
+  if (isLanguageModelProvider(provider)) {
+    if (!Number.isInteger(settings.requestTimeoutMs) || settings.requestTimeoutMs <= 0 || settings.requestTimeoutMs > 2147483647) {
+      return "Request timeout must be an integer between 1 and 2147483647 milliseconds. / 请求超时须为 1 到 2147483647 毫秒的整数。"
+    }
+    const temperature = settings.temperature
+    const effort = settings.reasoningEffort
+    if (temperature !== undefined && (!Number.isFinite(Number(temperature)) || Number(temperature) < 0 || Number(temperature) > (provider === "claude" ? 1 : 2))) {
+      return "Invalid temperature: use 0–1 for Claude or 0–2 for OpenAI-compatible models, or leave blank for the model default. / 温度范围：Claude 为 0–1，其余为 0–2；留空使用模型默认。"
+    }
+    if (effort !== undefined && !["none", "minimal", "low", "medium", "high", "xhigh", "max"].includes(effort)) {
+      return "Invalid reasoning effort; select a supported value or Model default. / 推理强度无效，请选择支持的值或模型默认。"
+    }
+    if (effort !== undefined && !["openai", "llm_custom", "openai_compatible"].includes(provider)) {
+      return "Reasoning effort is only supported here for OpenAI and explicitly configured compatible endpoints. Set Claude/DeepSeek to Model default. / 此推理强度选项仅用于 OpenAI 和兼容接口，Claude/DeepSeek 请选模型默认。"
+    }
+    // 只拦截官方明确的模型约束，未知模型由服务端判断，避免猜测能力。
+    if (provider === "openai" && /^gpt-6(?:[.-]|$)/i.test(settings.openaiModel)) {
+      if (effort === "none" && /^(gpt-6-astra|gpt-6\.1-sol)(?:-|$)/i.test(settings.openaiModel)) {
+        return "This model does not support reasoning effort none; choose low or Model default. / 此模型不支持关闭推理，请选择 low 或模型默认。"
+      }
+      if (temperature !== undefined && effort !== "none") {
+        return "Leave Temperature blank when reasoning is enabled or uses the model default. / 启用推理或使用默认推理强度时，请将温度留空。"
+      }
+    }
+  }
   return null
 }
 
@@ -743,15 +784,7 @@ export async function translateWithOpenAICompatibleStream(request: TranslationRe
           Authorization: `Bearer ${request.settings.openaiApiKey}`,
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({
-          model: request.settings.openaiModel,
-          messages: buildTranslationPrompt(request.text, request.direction.targetLabel).map(conversation => ({
-            role: conversation.Role,
-            content: conversation.Text
-          })),
-          temperature: 0.1,
-          stream: true
-        })
+        body: JSON.stringify(buildLanguageModelBody(request, false, true))
       },
       request.settings.requestTimeoutMs
     )
@@ -772,7 +805,6 @@ export async function translateWithOpenAICompatibleStream(request: TranslationRe
 export async function translateWithClaudeStream(request: TranslationRequest, callbacks: StreamCallbacks): Promise<void> {
   try {
     const baseUrl = request.settings.openaiBaseUrl.replace(/\/+$/, "")
-    const conversations = buildTranslationPrompt(request.text, request.direction.targetLabel)
     const response = await fetchWithTimeout(
       `${baseUrl}/messages`,
       {
@@ -782,14 +814,7 @@ export async function translateWithClaudeStream(request: TranslationRequest, cal
           "anthropic-version": "2023-06-01",
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({
-          model: request.settings.openaiModel,
-          system: conversations[0].Text,
-          messages: [{ role: "user", content: conversations[1].Text }],
-          max_tokens: 2048,
-          temperature: 0.1,
-          stream: true
-        })
+        body: JSON.stringify(buildLanguageModelBody(request, true, true))
       },
       request.settings.requestTimeoutMs
     )
@@ -1117,6 +1142,18 @@ function buildTranslationPrompt(text: string, targetLabel: string): TranslationP
   ]
 }
 
+function buildLanguageModelBody(request: TranslationRequest, isClaude: boolean, stream: boolean): Record<string, unknown> {
+  const prompt = buildTranslationPrompt(request.text, request.direction.targetLabel)
+  const body: Record<string, unknown> = isClaude
+    ? { model: request.settings.openaiModel, system: prompt[0].Text, messages: [{ role: "user", content: prompt[1].Text }], max_tokens: 2048 }
+    : { model: request.settings.openaiModel, messages: prompt.map(message => ({ role: message.Role, content: message.Text })) }
+  if (request.settings.temperature !== undefined) body.temperature = Number(request.settings.temperature)
+  // 默认和 none 含义不同；只有用户明确选择时才发送推理参数。
+  if (!isClaude && request.settings.reasoningEffort !== undefined) body.reasoning_effort = request.settings.reasoningEffort
+  if (stream) body.stream = true
+  return body
+}
+
 export function collapseExtraBlankLines(text: string): string {
   return text.replace(/\n{3,}/g, "\n")
 }
@@ -1131,14 +1168,7 @@ export async function translateWithOpenAICompatible(request: TranslationRequest,
         Authorization: `Bearer ${request.settings.openaiApiKey}`,
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({
-        model: request.settings.openaiModel,
-        messages: buildTranslationPrompt(request.text, request.direction.targetLabel).map(conversation => ({
-          role: conversation.Role,
-          content: conversation.Text
-        })),
-        temperature: 0.1
-      })
+      body: JSON.stringify(buildLanguageModelBody(request, false, false))
     },
     request.settings.requestTimeoutMs
   )
@@ -1156,7 +1186,6 @@ export async function translateWithOpenAICompatible(request: TranslationRequest,
 
 export async function translateWithClaude(request: TranslationRequest): Promise<TranslationResponse> {
   const baseUrl = request.settings.openaiBaseUrl.replace(/\/+$/, "")
-  const conversations = buildTranslationPrompt(request.text, request.direction.targetLabel)
   const response = await fetchWithTimeout(
     `${baseUrl}/messages`,
     {
@@ -1166,13 +1195,7 @@ export async function translateWithClaude(request: TranslationRequest): Promise<
         "anthropic-version": "2023-06-01",
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({
-        model: request.settings.openaiModel,
-        system: conversations[0].Text,
-        messages: [{ role: "user", content: conversations[1].Text }],
-        max_tokens: 2048,
-        temperature: 0.1
-      })
+      body: JSON.stringify(buildLanguageModelBody(request, true, false))
     },
     request.settings.requestTimeoutMs
   )
@@ -1219,7 +1242,6 @@ async function translateLanguageModelStream(provider: TranslationProvider, reque
   const isClaude = provider === "claude"
   const providerName = isClaude ? "Claude" : provider === "deepseek" ? "DeepSeek" : provider === "openai" ? "OpenAI" : "Custom LLM"
   const baseUrl = request.settings.openaiBaseUrl.replace(/\/+$/, "")
-  const prompt = buildTranslationPrompt(request.text, request.direction.targetLabel)
   const response = await fetchWithTimeout(
     `${baseUrl}/${isClaude ? "messages" : "chat/completions"}`,
     {
@@ -1227,23 +1249,7 @@ async function translateLanguageModelStream(provider: TranslationProvider, reque
       headers: isClaude
         ? { "x-api-key": request.settings.openaiApiKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json" }
         : { Authorization: `Bearer ${request.settings.openaiApiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify(
-        isClaude
-          ? {
-              model: request.settings.openaiModel,
-              system: prompt[0].Text,
-              messages: [{ role: "user", content: request.text }],
-              max_tokens: 2048,
-              temperature: 0.1,
-              stream: true
-            }
-          : {
-              model: request.settings.openaiModel,
-              messages: prompt.map(message => ({ role: message.Role, content: message.Text })),
-              temperature: 0.1,
-              stream: true
-            }
-      )
+      body: JSON.stringify(buildLanguageModelBody(request, isClaude, true))
     },
     request.settings.requestTimeoutMs
   )

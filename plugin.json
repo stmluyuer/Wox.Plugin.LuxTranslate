@@ -4,7 +4,7 @@
   "Name": "i18n:plugin_name",
   "Description": "i18n:plugin_description",
   "Author": "stmluyuer",
-  "Version": "0.1.6",
+  "Version": "0.1.7",
   "MinWoxVersion": "2.4.8",
   "Runtime": "nodejs",
   "Website": "https://github.com/stmluyuer/Wox.Plugin.LuxTranslate",
@@ -25,7 +25,7 @@
       "settings_no_setup_provider_table": "No-setup providers",
       "settings_no_setup_provider_table_tip": "Providers that do not need manual API keys. Select them above or use Filters in the translation window.",
       "settings_llm_provider_table": "Large language model providers",
-      "settings_llm_provider_table_tip": "Each row is an independently selectable model. Add multiple rows for the same provider with different names or models; each needs its own API key, Base URL and model.",
+      "settings_llm_provider_table_tip": "Each row is an independently selectable model. Add multiple rows for the same provider with different names or models; each needs its own API key, Base URL and model. Temperature and reasoning default to omitted. Effort values depend on model support; Claude/DeepSeek must use Model default. For slow reasoning, set a longer per-model timeout (e.g. 120000 ms).",
       "table_name": "Name",
       "table_provider": "Provider",
       "table_note": "Note",
@@ -39,6 +39,11 @@
       "table_api_key": "API key",
       "table_base_url": "Base URL",
       "table_model": "Model",
+      "table_temperature": "Temperature (blank: model default)",
+      "table_reasoning_effort": "Reasoning effort (OpenAI / compatible endpoints)",
+      "table_model_timeout": "Timeout in ms (blank: global setting)",
+      "reasoning_default": "Model default (do not send)",
+      "reasoning_none": "None (explicitly disable reasoning)",
       "settings_source": "Source language",
       "settings_source_tip": "Use auto detection unless a provider requires a fixed source language",
       "settings_target_language": "Target language",
@@ -130,7 +135,7 @@
       "settings_no_setup_provider_table": "免配置翻译源",
       "settings_no_setup_provider_table_tip": "不需要手动填写 API Key 的翻译源。可在上方多选框或翻译窗口的“筛选”中选择。",
       "settings_llm_provider_table": "大模型翻译源",
-      "settings_llm_provider_table_tip": "每一行都是独立可选的模型。可为同一供应商添加多行，用名称和模型区分；每行分别填写 API Key、Base URL 和模型。",
+      "settings_llm_provider_table_tip": "每一行都是独立可选的模型。可为同一供应商添加多行，用名称和模型区分；每行分别填写 API Key、Base URL 和模型。温度留空、推理强度选模型默认时不发送参数；强度须由模型支持，Claude/DeepSeek 请选模型默认。推理较慢时可单独设置较长超时，如 120000 毫秒。",
       "table_name": "名称",
       "table_provider": "翻译源",
       "table_note": "备注",
@@ -144,6 +149,11 @@
       "table_api_key": "API Key",
       "table_base_url": "Base URL",
       "table_model": "模型",
+      "table_temperature": "温度（留空：模型默认）",
+      "table_reasoning_effort": "推理强度（OpenAI / 兼容接口）",
+      "table_model_timeout": "超时毫秒数（留空：全局设置）",
+      "reasoning_default": "模型默认（不发送参数）",
+      "reasoning_none": "none（明确关闭推理）",
       "settings_source": "源语言",
       "settings_source_tip": "除非翻译服务需要固定源语言，否则建议自动检测",
       "settings_target_language": "目标语言",
@@ -549,6 +559,61 @@
           {
             "Key": "model",
             "Label": "i18n:table_model",
+            "Type": "text",
+            "Width": 240,
+            "HideInTable": true
+          },
+          {
+            "Key": "temperature",
+            "Label": "i18n:table_temperature",
+            "Type": "text",
+            "Width": 240,
+            "HideInTable": true
+          },
+          {
+            "Key": "reasoningEffort",
+            "Label": "i18n:table_reasoning_effort",
+            "Type": "select",
+            "Width": 240,
+            "HideInTable": true,
+            "SelectOptions": [
+              {
+                "Label": "i18n:reasoning_default",
+                "Value": ""
+              },
+              {
+                "Label": "i18n:reasoning_none",
+                "Value": "none"
+              },
+              {
+                "Label": "minimal",
+                "Value": "minimal"
+              },
+              {
+                "Label": "low",
+                "Value": "low"
+              },
+              {
+                "Label": "medium",
+                "Value": "medium"
+              },
+              {
+                "Label": "high",
+                "Value": "high"
+              },
+              {
+                "Label": "xhigh",
+                "Value": "xhigh"
+              },
+              {
+                "Label": "max",
+                "Value": "max"
+              }
+            ]
+          },
+          {
+            "Key": "requestTimeoutMs",
+            "Label": "i18n:table_model_timeout",
             "Type": "text",
             "Width": 240,
             "HideInTable": true

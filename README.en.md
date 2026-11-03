@@ -31,6 +31,10 @@ The preview displays the Chinese translation, full source text, and provider.
 - Optional preview details for source text, provider, and language direction.
 - Provider settings grouped by category, with API keys, base URLs, and models configured from editable table rows.
 
+## Model parameters in 0.1.7
+
+Edit a model row to configure temperature, reasoning effort and timeout. A blank temperature and Model default effort omit the corresponding request fields, avoiding HTTP 400 errors caused by forced temperature values. Effort is for OpenAI / compatible endpoints and must be supported by the model; keep Model default for Claude and DeepSeek. `none` explicitly disables reasoning and differs from Model default. Timeout is in milliseconds; leave blank to inherit the global setting or use `120000` for slower reasoning. Changing these parameters invalidates the configuration’s previous translation cache.
+
 ## Providers
 
 LuxTranslate groups providers into two categories:
@@ -50,9 +54,9 @@ Notes:
 
 ## Installation
 
-Requires **Wox 2.4.8 or later**. Search for **LuxTranslate** in the Wox plugin store, or download `wox.plugin.luxtranslate.wox` from [GitHub Releases](https://github.com/stmluyuer/Wox.Plugin.LuxTranslate/releases/latest) and open it with Wox. The current release is [v0.1.6](https://github.com/stmluyuer/Wox.Plugin.LuxTranslate/releases/tag/v0.1.6).
+Requires **Wox 2.4.8 or later**. Search for **LuxTranslate** in the Wox plugin store, or download `wox.plugin.luxtranslate.wox` from [GitHub Releases](https://github.com/stmluyuer/Wox.Plugin.LuxTranslate/releases/latest) and open it with Wox. The current release is [v0.1.7](https://github.com/stmluyuer/Wox.Plugin.LuxTranslate/releases/tag/v0.1.7).
 
-To build from source (current version: 0.1.6):
+To build from source (current version: 0.1.7):
 
 ```bash
 git clone https://github.com/stmluyuer/Wox.Plugin.LuxTranslate.git

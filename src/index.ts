@@ -237,7 +237,10 @@ function settingsForSource(settings: PluginSettings, source: TranslationSource):
     sourceId: source.id,
     openaiBaseUrl: source.row?.baseUrl?.trim() || "",
     openaiApiKey: source.row?.apiKey?.trim() || "",
-    openaiModel: source.row?.model?.trim() || ""
+    openaiModel: source.row?.model?.trim() || "",
+    temperature: source.row?.temperature?.trim() || undefined,
+    reasoningEffort: source.row?.reasoningEffort?.trim() || undefined,
+    requestTimeoutMs: source.row?.requestTimeoutMs?.trim() ? Number(source.row.requestTimeoutMs) : settings.requestTimeoutMs
   }
 }
 
