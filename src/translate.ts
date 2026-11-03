@@ -42,8 +42,10 @@ export const LANGUAGE_DEEPL: Record<string, string> = {
 
 export interface PluginSettings {
   defaultProvider: TranslationProvider
-  visibleProviders: TranslationProvider[]
+  defaultSourceId: string
+  visibleProviders: string[]
   providerRows: ProviderTableRow[]
+  sourceId?: string
   defaultSourceLanguage: LanguageCode
   defaultTargetLanguage: LanguageCode
   /** 配对语言：当源语言等于 Wox 界面语言时翻译成此语言 */
@@ -69,6 +71,7 @@ export interface ParsedQuery {
   /** 用户通过 tr 指令指定的源语言，覆盖设置中的源语言 */
   sourceLanguage?: LanguageCode
   forceRefresh?: boolean
+  configurationId?: string
 }
 
 export interface LanguageDirection {
@@ -101,9 +104,11 @@ export interface TranslationHistoryEntry {
   detectedSourceLanguage?: string
   timestamp: number
   configurationKey?: string
+  configurationId?: string
 }
 
 export interface ProviderTableRow {
+  id?: string
   provider?: string
   name?: string
   note?: string
@@ -139,6 +144,7 @@ const CAIYUN_BROWSER_ID = "beba19f9d7f10c74c98334c9e8afcd34"
 
 export const DEFAULT_SETTINGS: PluginSettings = {
   defaultProvider: "microsoft",
+  defaultSourceId: "microsoft",
   visibleProviders: [],
   providerRows: [],
   defaultSourceLanguage: "auto",
@@ -292,7 +298,7 @@ export function translationConfigurationKey(provider: TranslationProvider, setti
   // Model, endpoint, and account changes must not reuse another configuration's translation.
   // Hash the inputs so history never stores a second copy of the credential.
   return createHash("sha256")
-    .update(JSON.stringify([provider, settings.openaiBaseUrl.replace(/\/+$/, ""), settings.openaiModel, settings.openaiApiKey]))
+    .update(JSON.stringify([provider, settings.openaiBaseUrl.replace(/\/+$/, ""), settings.openaiModel, settings.openaiApiKey, settings.sourceId]))
     .digest("hex")
 }
 
@@ -338,6 +344,7 @@ export function parseTranslationQuery(search: string, defaultProvider: Translati
   let targetLanguage: LanguageCode | undefined
   let sourceLanguage: LanguageCode | undefined
   let forceRefresh = false
+  let configurationId: string | undefined
 
   // 1. 检查第一个单词是否是翻译源别名
   const first = words[0].toLowerCase()
@@ -345,6 +352,11 @@ export function parseTranslationQuery(search: string, defaultProvider: Translati
   if (providerAlias) {
     provider = providerAlias
     forcedProvider = true
+    idx++
+  }
+
+  if (forcedProvider && words[idx]?.startsWith("--config=")) {
+    configurationId = words[idx].slice("--config=".length)
     idx++
   }
 
@@ -371,7 +383,7 @@ export function parseTranslationQuery(search: string, defaultProvider: Translati
   }
   const text = trimmed.slice(textStart)
 
-  return { provider, text, forcedProvider, targetLanguage, sourceLanguage, forceRefresh }
+  return { provider, text, forcedProvider, targetLanguage, sourceLanguage, forceRefresh, configurationId }
 }
 
 /** 解析语言规格指令，支持格式：zh / :zh / en:zh / auto:zh */
@@ -501,6 +513,9 @@ export function resolveLanguageDirection(text: string, sourceLanguage: LanguageC
 export function getMissingConfiguration(provider: TranslationProvider, settings: PluginSettings): string | null {
   if (provider === "deepl" && settings.deeplApiKey.trim() === "") {
     return "DeepL API key is required for DeepL translation."
+  }
+  if (isLanguageModelProvider(provider) && settings.openaiBaseUrl.trim() === "") {
+    return "Base URL is required for this model configuration."
   }
   if (["openai", "claude", "deepseek", "llm_custom", "openai_compatible"].includes(provider) && settings.openaiApiKey.trim() === "") {
     return "API key is required for this large language model provider."

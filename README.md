@@ -50,9 +50,9 @@ Wox v2.4.7 + LuxTranslate v0.1.4 的 10 秒演示：输入两句相关的英文�
 
 ## 安装
 
-需要 **Wox 2.4.8 或更高版本**。在 Wox 的插件商店搜索 **LuxTranslate** 安装，也可以从 [GitHub Releases](https://github.com/stmluyuer/Wox.Plugin.LuxTranslate/releases/latest) 下载 `wox.plugin.luxtranslate.wox`，在 Wox 中打开安装。当前发布版为 [v0.1.5](https://github.com/stmluyuer/Wox.Plugin.LuxTranslate/releases/tag/v0.1.5)。
+需要 **Wox 2.4.8 或更高版本**。在 Wox 的插件商店搜索 **LuxTranslate** 安装，也可以从 [GitHub Releases](https://github.com/stmluyuer/Wox.Plugin.LuxTranslate/releases/latest) 下载 `wox.plugin.luxtranslate.wox`，在 Wox 中打开安装。当前发布版为 [v0.1.6](https://github.com/stmluyuer/Wox.Plugin.LuxTranslate/releases/tag/v0.1.6)。
 
-从源码构建（当前版本为 0.1.5）：
+从源码构建（当前版本为 0.1.6）：
 
 ```bash
 git clone https://github.com/stmluyuer/Wox.Plugin.LuxTranslate.git
@@ -88,16 +88,18 @@ pnpm build
 
 发布版 v0.1.4 通过翻译窗口的“筛选”（`Ctrl+F`，macOS 为 `Cmd+F`）选择多个翻译源。
 
-0.1.5 新增设置页多选，与翻译窗口共用选择。需要 Wox 2.4.8 或更高版本，该版本已包含多选修复（[PR #4644](https://github.com/Wox-launcher/Wox/pull/4644)）。
+0.1.6 按每条模型配置选择翻译源，设置页和翻译窗口共用选择。需要 Wox 2.4.8 或更高版本，该版本已包含多选修复（[PR #4644](https://github.com/Wox-launcher/Wox/pull/4644)）。
 
 - `默认翻译源`：没有选择翻译源时，普通 `tr <text>` 查询使用的来源。
-- `翻译源（多选）`（0.1.5）：设置页和翻译窗口的“筛选”（`Ctrl+F`，macOS 为 `Cmd+F`）共用同一份选择，修改后在下次查询时生效。留空时使用默认翻译源，也可通过“使用默认翻译源”操作清空选择。升级会保留原先实际使用的筛选选择，试用框里的选项不会覆盖它。
+- `翻译源（多选）`：设置页和翻译窗口的“筛选”（`Ctrl+F`，macOS 为 `Cmd+F`）共用选择。大模型显示配置名称和模型，可同时选择同一供应商的多条配置；留空时使用默认翻译源。升级会把原来的供应商选择映射到之前使用的第一条配置，不自动启用其他模型。
 - `免配置翻译源`：管理 Microsoft、有道、彩云等无需手动 API Key 的翻译源。
-- `大模型翻译源`：配置 OpenAI、Claude、DeepSeek 或通用大模型的 API Key、Base URL 和模型名。
+- `大模型翻译源`：每一行都是独立的 OpenAI、Claude、DeepSeek 或通用大模型配置。分别填写名称、API Key、Base URL 和模型，可添加同一供应商的多个模型。每行使用自己的凭据，空字段会提示补全；编辑名称或模型会保留该行的选择，复制行会生成独立配置。
 - `历史记录条数`：默认保留 10 条翻译历史。
 - `显示原文和服务详情`：控制预览中是否展示原文、provider 和语言方向。
 
-结果菜单支持“重新翻译”和切换翻译源，都会保留原文及语言方向。选中文本入口将整段原文作为文字处理，保留换行和缩进；选中 `history` 等单词也会正常翻译。
+每个选中的来源都保留自己的结果行，显示翻译中、译文、配置缺失或请求失败；普通翻译与大模型流式输出混用时不会丢失结果。
+
+结果菜单支持“重新翻译”和切换到具体配置，都会保留原文及语言方向；“重新翻译”继续使用该行对应的模型。`tr openai`、`tr deepseek` 等供应商命令会查询该类的所有配置。选中文本入口将整段原文作为文字处理，保留换行和缩进；选中 `history` 等单词也会正常翻译。
 
 ## 开发
 

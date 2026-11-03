@@ -1,4 +1,4 @@
-import { ActionContext, Context, Plugin, PluginInitParams, PublicAPI, Query, Result, WoxImage } from "@wox-launcher/wox-plugin"
+import { Context, Plugin, PluginInitParams, PublicAPI, Query, Result, WoxImage } from "@wox-launcher/wox-plugin"
 import { speakText } from "./speech"
 import { randomUUID } from "node:crypto"
 import {
@@ -14,6 +14,7 @@ import {
   parseProviderTableRows,
   parseTranslationQuery,
   PluginSettings,
+  ProviderTableRow,
   resolveLanguageDirection,
   searchHistoryEntries,
   translateText,
@@ -31,6 +32,7 @@ let historyWrites: Promise<void> = Promise.resolve()
 let providerWrites: Promise<void> = Promise.resolve()
 let lastProviderSelection = ""
 let providerRefinementId = "translation_providers"
+let lastSourceCatalog = ""
 
 const HISTORY_SETTING_KEY = "translation_history"
 const PROVIDERS_SETTING_KEY = "visible_providers"
@@ -67,13 +69,68 @@ async function getSetting(ctx: Context, key: string, fallback: string): Promise<
   }
 }
 
-function visibleProviderList(value: string): TranslationProvider[] {
-  return parseProviderList(value).filter(provider => VISIBLE_PROVIDERS.includes(provider))
+interface TranslationSource {
+  id: string
+  provider: TranslationProvider
+  name: string
+  row?: ProviderTableRow
+}
+
+function translationSources(settings: PluginSettings): TranslationSource[] {
+  return [
+    ...VISIBLE_PROVIDERS.filter(provider => !isLanguageModelProvider(provider)).map(provider => ({ id: provider, provider, name: providerDisplayName(provider) })),
+    ...settings.providerRows
+      .filter(row => isLanguageModelProvider(normalizeProvider(row.provider || "")))
+      .map(row => ({
+        id: row.id as string,
+        provider: normalizeProvider(row.provider || ""),
+        name: [row.name?.trim() || providerDisplayName(normalizeProvider(row.provider || "")), row.model?.trim()].filter(Boolean).join(" · "),
+        row
+      }))
+  ]
+}
+
+function visibleSourceList(value: string, sources: TranslationSource[]): string[] {
+  const values: string[] = value.trim().startsWith("[") ? JSON.parse(value) : value.split(",")
+  // 旧版本保存供应商类型；只映射到原来使用的第一条配置，不擅自启用新增模型。
+  return Array.from(
+    new Set(
+      values
+        .map(value => {
+          const selected = value.trim()
+          return sources.find(source => source.id === selected)?.id || sources.find(source => source.provider === selected)?.id
+        })
+        .filter((id): id is string => id !== undefined)
+    )
+  )
+}
+
+async function loadModelRows(ctx: Context): Promise<ProviderTableRow[]> {
+  // 查询与设置页都可能同时读取新行，用已有设置写入队列保证只分配一次标识。
+  const update = providerWrites.then(async () => {
+    const rows = parseProviderTableRows(await getSetting(ctx, "llm_provider_table", ""))
+    const ids = new Set<string>()
+    let changed = false
+    for (const row of rows) {
+      if (!row.id || ids.has(row.id)) {
+        row.id = "model_" + randomUUID()
+        changed = true
+      }
+      ids.add(row.id)
+    }
+    if (changed) await api.SaveSetting(ctx, "llm_provider_table", JSON.stringify(rows), false)
+    return rows
+  })
+  providerWrites = update.then(
+    () => undefined,
+    () => undefined
+  )
+  return update
 }
 
 async function migrateVisibleProviders(ctx: Context): Promise<void> {
   if ((await getSetting(ctx, PROVIDERS_MIGRATED_KEY, "")) === "true") return
-  const legacy = visibleProviderList(await getSetting(ctx, PROVIDERS_SETTING_KEY, ""))
+  const legacy = parseProviderList(await getSetting(ctx, PROVIDERS_SETTING_KEY, ""))
   const enabled = await Promise.all(VISIBLE_PROVIDERS.map(provider => getSetting(ctx, `visible_provider_${provider}`, legacy.includes(provider) ? "true" : "false")))
   const providers = VISIBLE_PROVIDERS.filter((_provider, index) => enabled[index] === "true")
   await api.SaveSetting(ctx, PROVIDERS_SETTING_KEY, providers.join(","), false)
@@ -82,7 +139,7 @@ async function migrateVisibleProviders(ctx: Context): Promise<void> {
   await api.SaveSetting(ctx, PROVIDERS_MIGRATED_KEY, "true", false)
 }
 
-async function saveVisibleProviders(ctx: Context, providers: TranslationProvider[]): Promise<void> {
+async function saveVisibleProviders(ctx: Context, providers: string[]): Promise<void> {
   const write = providerWrites.then(async () => {
     const value = providers.join(",")
     await api.SaveSetting(ctx, PROVIDERS_SETTING_KEY, value, false)
@@ -93,28 +150,31 @@ async function saveVisibleProviders(ctx: Context, providers: TranslationProvider
   await write
 }
 
-async function resolveVisibleProviders(ctx: Context, refinements?: Record<string, string>): Promise<{ providers: TranslationProvider[]; refinementId: string }> {
+async function resolveVisibleProviders(ctx: Context, settings: PluginSettings, refinements?: Record<string, string>): Promise<{ providers: string[]; refinementId: string }> {
   // Serialize reads and writes together so rapid filter queries observe the
   // preceding save instead of mistaking it for an edit from the settings page.
   const update = providerWrites.then(async () => {
     const stored = await api.GetSetting(ctx, PROVIDERS_SETTING_KEY)
-    if (stored !== lastProviderSelection) {
+    const sources = translationSources(settings)
+    const catalog = JSON.stringify(sources.map(source => [source.id, source.name]))
+    if (stored !== lastProviderSelection || catalog !== lastSourceCatalog) {
       // Wox retains query values by refinement ID. A new ID discards stale
       // filters and lets the host apply the settings page's updated selection.
       providerRefinementId = "translation_providers_" + randomUUID()
       lastProviderSelection = stored
+      lastSourceCatalog = catalog
     }
-    let providers = visibleProviderList(stored)
+    let providers = visibleSourceList(stored, sources)
     const selected = refinements?.[providerRefinementId]
     if (typeof selected === "string") {
-      const next = visibleProviderList(selected)
+      const next = visibleSourceList(selected, sources)
       if (next.length || selected.trim() === "") {
-        const value = next.join(",")
-        if (value !== stored) await api.SaveSetting(ctx, PROVIDERS_SETTING_KEY, value, false)
-        lastProviderSelection = value
         providers = next
       }
     }
+    const value = providers.join(",")
+    if (value !== stored) await api.SaveSetting(ctx, PROVIDERS_SETTING_KEY, value, false)
+    lastProviderSelection = value
     return { providers, refinementId: providerRefinementId }
   })
   providerWrites = update.then(
@@ -133,16 +193,18 @@ async function loadSettings(ctx: Context): Promise<PluginSettings> {
   const showPreviewDetails = (await getSetting(ctx, "show_preview_details", String(DEFAULT_SETTINGS.showPreviewDetails))) === "true"
   const enableSpeechPlayback = (await getSetting(ctx, "enable_speech_playback", String(DEFAULT_SETTINGS.enableSpeechPlayback))) === "true"
   const noSetupProviderTableValue = await getSetting(ctx, "no_setup_provider_table", "")
-  const llmProviderTableValue = await getSetting(ctx, "llm_provider_table", "")
-  const visibleProviders = visibleProviderList(await getSetting(ctx, PROVIDERS_SETTING_KEY, ""))
+  const modelRows = await loadModelRows(ctx)
+  const storedSelection = await getSetting(ctx, PROVIDERS_SETTING_KEY, "")
+  const defaultSourceId = await getSetting(ctx, "default_provider", DEFAULT_SETTINGS.defaultProvider)
 
   const targetLanguageRaw = await getSetting(ctx, "default_target_language", DEFAULT_SETTINGS.defaultTargetLanguage || "auto")
   const pairLanguageRaw = await getSetting(ctx, "pair_language", DEFAULT_SETTINGS.pairLanguage || "auto")
 
-  return {
-    defaultProvider: normalizeProvider(await getSetting(ctx, "default_provider", DEFAULT_SETTINGS.defaultProvider)),
-    visibleProviders,
-    providerRows: [...parseProviderTableRows(noSetupProviderTableValue), ...parseProviderTableRows(llmProviderTableValue)],
+  const settings: PluginSettings = {
+    defaultProvider: normalizeProvider(defaultSourceId),
+    defaultSourceId,
+    visibleProviders: [],
+    providerRows: [...parseProviderTableRows(noSetupProviderTableValue), ...modelRows],
     defaultSourceLanguage: (await getSetting(ctx, "default_source_language", DEFAULT_SETTINGS.defaultSourceLanguage)) as LanguageCode,
     defaultTargetLanguage: normalizeLanguageCode(targetLanguageRaw) as LanguageCode,
     pairLanguage: normalizeLanguageCode(pairLanguageRaw) as LanguageCode,
@@ -156,26 +218,26 @@ async function loadSettings(ctx: Context): Promise<PluginSettings> {
     enableSpeechPlayback,
     historyLimit: Number.isFinite(historyLimit) && historyLimit >= 0 ? historyLimit : DEFAULT_SETTINGS.historyLimit
   }
+  const sources = translationSources(settings)
+  settings.visibleProviders = visibleSourceList(storedSelection, sources)
+  const defaultSource = sources.find(source => source.id === defaultSourceId) || sources.find(source => source.provider === defaultSourceId)
+  if (defaultSource) {
+    settings.defaultProvider = defaultSource.provider
+    settings.defaultSourceId = defaultSource.id
+    if (defaultSourceId !== defaultSource.id) await api.SaveSetting(ctx, "default_provider", defaultSource.id, false)
+  }
+  return settings
 }
 
-function settingsForProvider(settings: PluginSettings, provider: TranslationProvider): PluginSettings {
-  const row = settings.providerRows.find(item => item.provider === provider)
-  const providerDefaults: Partial<Pick<PluginSettings, "openaiBaseUrl" | "openaiModel">> = {
-    openaiBaseUrl:
-      provider === "openai" ? "https://api.openai.com/v1" : provider === "deepseek" ? "https://api.deepseek.com/v1" : provider === "claude" ? "https://api.anthropic.com/v1" : settings.openaiBaseUrl,
-    openaiModel: provider === "openai" ? "gpt-4o-mini" : provider === "deepseek" ? "deepseek-chat" : provider === "claude" ? "claude-3-5-haiku-latest" : settings.openaiModel
-  }
-
-  if (!row) {
-    return { ...settings, ...providerDefaults }
-  }
-
+function settingsForSource(settings: PluginSettings, source: TranslationSource): PluginSettings {
+  if (!isLanguageModelProvider(source.provider)) return { ...settings, sourceId: source.id }
+  // 每条配置独立使用自己的凭据、地址和模型，空字段必须显示配置提示。
   return {
     ...settings,
-    ...providerDefaults,
-    openaiBaseUrl: row.baseUrl?.trim() || providerDefaults.openaiBaseUrl || settings.openaiBaseUrl,
-    openaiApiKey: row.apiKey?.trim() || settings.openaiApiKey,
-    openaiModel: row.model?.trim() || providerDefaults.openaiModel || settings.openaiModel
+    sourceId: source.id,
+    openaiBaseUrl: source.row?.baseUrl?.trim() || "",
+    openaiApiKey: source.row?.apiKey?.trim() || "",
+    openaiModel: source.row?.model?.trim() || ""
   }
 }
 
@@ -237,12 +299,12 @@ function desc(text: string): string {
 }
 
 async function buildProviderRefinement(ctx: Context, settings: PluginSettings, refinementId: string): Promise<ProviderRefinement> {
-  const labelKeys = ["provider_microsoft", "provider_youdao", "provider_caiyun", "provider_openai", "provider_claude", "provider_deepseek", "provider_custom_llm"]
+  const sources = translationSources(settings)
   return {
     Id: refinementId,
     Title: await t(ctx, "refinement_provider_title"),
     Type: "multiSelect",
-    Options: await Promise.all(VISIBLE_PROVIDERS.map(async (provider, index) => ({ Value: provider, Title: await t(ctx, labelKeys[index]) }))),
+    Options: sources.map(source => ({ Value: source.id, Title: source.name })),
     DefaultValue: settings.visibleProviders,
     Hotkey: ""
   }
@@ -266,7 +328,7 @@ async function buildHelpResult(ctx: Context, settings: PluginSettings): Promise<
   const dsc = await t(ctx, "help_preview_description")
   return {
     Title: await t(ctx, "help_title"),
-    SubTitle: `${await t(ctx, "help_provider_selection")} · ${await t(ctx, "selected_providers")}: ${(settings.visibleProviders.length ? settings.visibleProviders : [settings.defaultProvider]).map(providerDisplayName).join(", ")}`,
+    SubTitle: `${await t(ctx, "help_provider_selection")} · ${await t(ctx, "selected_providers")}: ${(settings.visibleProviders.length ? settings.visibleProviders : [settings.defaultSourceId]).map(id => translationSources(settings).find(source => source.id === id)?.name || id).join(", ")}`,
     Icon: PLUGIN_ICON,
     Score: 100,
     Preview: {
@@ -376,40 +438,35 @@ async function buildResultActions(
     })
   }
 
-  return actions.concat(await buildRetryActions(ctx, sourceText, provider, direction))
+  return actions.concat(await buildRetryActions(ctx, sourceText, provider, direction, settings))
 }
 
 async function buildRetryActions(
   ctx: Context,
   sourceText: string,
   provider: TranslationProvider,
-  direction: Pick<LanguageDirection, "sourceLanguage" | "targetLanguage">
+  direction: Pick<LanguageDirection, "sourceLanguage" | "targetLanguage">,
+  settings: PluginSettings
 ): Promise<NonNullable<Result["Actions"]>> {
-  // Include an explicit language spec before the body so retrying also preserves
-  // literal text such as "history" or "en", regardless of the current defaults.
-  const queryFor = (next: TranslationProvider, refresh = false) => `tr ${providerCommand(next)} ${refresh ? "--refresh " : ""}${direction.sourceLanguage}:${direction.targetLanguage} ${sourceText}`
+  // 重试携带具体配置和语言，避免同一供应商的另一个模型接管请求。
+  const queryFor = (source: { provider: TranslationProvider; id?: string }, refresh = false) =>
+    `tr ${providerCommand(source.provider)} ${source.id ? "--config=" + source.id + " " : ""}${refresh ? "--refresh " : ""}${direction.sourceLanguage}:${direction.targetLanguage} ${sourceText}`
   const actions: NonNullable<Result["Actions"]> = [
     {
       Name: await t(ctx, "action_retranslate"),
-      ContextData: { provider },
+      ContextData: { provider, configurationId: settings.sourceId || "" },
       Action: async (ctx: Context) => {
-        await api.ChangeQuery(ctx, { QueryType: "input", QueryText: queryFor(provider, true) })
+        await api.ChangeQuery(ctx, { QueryType: "input", QueryText: queryFor({ provider, id: settings.sourceId }, true) })
       }
     }
   ]
-  for (const alternate of VISIBLE_PROVIDERS) {
-    if (alternate === provider) {
-      continue
-    }
+  for (const alternate of translationSources(settings)) {
+    if (alternate.id === settings.sourceId) continue
     actions.push({
-      Name: `${await t(ctx, "action_retry_with")} ${providerDisplayName(alternate)}`,
-      ContextData: { provider: alternate },
-      Action: async (ctx: Context, actionContext: ActionContext) => {
-        const nextProvider = (actionContext.ContextData.provider || alternate) as TranslationProvider
-        await api.ChangeQuery(ctx, {
-          QueryType: "input",
-          QueryText: queryFor(nextProvider)
-        })
+      Name: `${await t(ctx, "action_retry_with")} ${alternate.name}`,
+      ContextData: { provider: alternate.provider, configurationId: alternate.id },
+      Action: async (ctx: Context) => {
+        await api.ChangeQuery(ctx, { QueryType: "input", QueryText: queryFor(alternate) })
       }
     })
   }
@@ -440,15 +497,16 @@ async function buildTranslationPreview(ctx: Context, translatedText: string, sou
 
 async function translateProviderResult(
   ctx: Context,
-  provider: TranslationProvider,
+  source: TranslationSource,
   sourceText: string,
   settings: PluginSettings,
   score: number,
   includeProviderInTitle: boolean,
   languageOverrides?: { sourceLanguage?: LanguageCode; targetLanguage?: LanguageCode; forceRefresh?: boolean },
   query?: Query
-): Promise<Result | null> {
-  const providerSettings = settingsForProvider(settings, provider)
+): Promise<Result> {
+  const provider = source.provider
+  const providerSettings = settingsForSource(settings, source)
 
   // 用户通过 tr 指令指定的语言覆盖优先，否则走设置项
   const effectiveSource = languageOverrides?.sourceLanguage || providerSettings.defaultSourceLanguage
@@ -459,7 +517,12 @@ async function translateProviderResult(
   let direction = resolveLanguageDirection(sourceText, effectiveSource, effectiveTarget, pair)
   const missingConfiguration = getMissingConfiguration(provider, providerSettings)
   if (missingConfiguration) {
-    return { ...buildConfigurationResult(missingConfiguration, provider), Score: score, Actions: await buildRetryActions(ctx, sourceText, provider, direction) }
+    return {
+      ...buildConfigurationResult(missingConfiguration, provider),
+      Title: `${source.name}: ${await t(ctx, "configuration_required_title")}`,
+      Score: score,
+      Actions: await buildRetryActions(ctx, sourceText, provider, direction, providerSettings)
+    }
   }
   const configurationKey = translationConfigurationKey(provider, providerSettings)
   const history = await loadHistory(ctx)
@@ -477,7 +540,7 @@ async function translateProviderResult(
   direction = directionFromDetectedLanguage(detectedHistory?.detectedSourceLanguage) || direction
   const historyEntry = languageOverrides?.forceRefresh ? undefined : history.find(entry => historyKeyMatches(entry, provider, sourceText, direction, configurationKey))
   if (historyEntry) {
-    return buildTranslationResult(ctx, historyEntry, sourceText, providerSettings, score, includeProviderInTitle, true)
+    return buildTranslationResult(ctx, { ...historyEntry, providerName: source.name, configurationId: source.id }, sourceText, providerSettings, score, includeProviderInTitle, true)
   }
 
   const finishTranslation = async (onProgress?: (text: string) => Promise<void>): Promise<Result> => {
@@ -503,7 +566,8 @@ async function translateProviderResult(
       sourceText,
       translatedText: translation.translatedText,
       provider,
-      providerName: translation.providerName,
+      providerName: source.name,
+      configurationId: source.id,
       sourceLanguage: direction.sourceLanguage,
       targetLanguage: direction.targetLanguage,
       detectedSourceLanguage: translation.detectedSourceLanguage,
@@ -517,7 +581,7 @@ async function translateProviderResult(
   const failureResult = async (error: unknown): Promise<Result> => {
     await api.Log(ctx, "Error", error instanceof Error ? error.message : String(error))
     const message = errorMessageForProvider(error, provider)
-    const title = `${providerDisplayName(provider)}: ${await t(ctx, error instanceof IncompleteTranslationError ? "translation_incomplete_title" : "translation_failed_title")}`
+    const title = `${source.name}: ${await t(ctx, error instanceof IncompleteTranslationError ? "translation_incomplete_title" : "translation_failed_title")}`
     return {
       Title: title,
       SubTitle: message,
@@ -528,44 +592,48 @@ async function translateProviderResult(
         PreviewData: `${message}\n\n${error instanceof IncompleteTranslationError ? error.partialText : ""}`,
         PreviewProperties: {}
       },
-      Actions: await buildRetryActions(ctx, sourceText, provider, direction)
+      Actions: await buildRetryActions(ctx, sourceText, provider, direction, providerSettings)
     }
   }
 
-  if (query && isLanguageModelProvider(provider) && typeof api.PushResults === "function") {
+  if (query) {
     const resultId = `lux-tr-${randomUUID()}`
     const placeholder: Result = {
       Id: resultId,
-      Title: await t(ctx, "translating_title"),
+      Title: `${source.name}: ${await t(ctx, "translating_title")}`,
       SubTitle: sourceText,
       Icon: PLUGIN_ICON,
       Score: score,
       Actions: [],
       Preview: { PreviewType: "markdown", PreviewData: await t(ctx, "translating_title"), PreviewProperties: {} }
     }
-    // Register the placeholder before the first token; updating an unregistered ID
-    // can otherwise cancel a fast stream, especially when another provider is slow.
-    if (!(await api.PushResults(ctx, query, [placeholder]))) return null
-    const stream = async () => {
-      try {
-        let lastUpdate = 0
-        const result = await finishTranslation(async text => {
-          if (lastUpdate !== 0 && Date.now() - lastUpdate < 80) return
-          lastUpdate = Date.now()
-          const visible = await api.UpdateResult(ctx, {
-            Id: resultId,
-            Preview: { PreviewType: "markdown", PreviewData: collapseExtraBlankLines(text), PreviewProperties: {} }
-          })
-          if (!visible) throw new Error("Query no longer visible")
-        })
-        await api.UpdateResult(ctx, { ...result, Id: resultId })
-      } catch (error) {
-        if (error instanceof Error && error.message === "Query no longer visible") return
-        await api.UpdateResult(ctx, { ...(await failureResult(error)), Id: resultId })
-      }
+    // 推送只负责提前显示；查询必须等待翻译结束并返回同一个 ID，
+    // 否则宿主的正式结果快照会删除这些流式结果。
+    if (!(await api.PushResults(ctx, query, [placeholder]))) return placeholder
+    let result: Result
+    try {
+      let lastUpdate = 0
+      result = await finishTranslation(
+        isLanguageModelProvider(provider)
+          ? async text => {
+              if (lastUpdate !== 0 && Date.now() - lastUpdate < 80) return
+              lastUpdate = Date.now()
+              const visible = await api.UpdateResult(ctx, {
+                Id: resultId,
+                Title: `${source.name}: ${collapseExtraBlankLines(text)}`,
+                Preview: { PreviewType: "markdown", PreviewData: collapseExtraBlankLines(text), PreviewProperties: {} }
+              })
+              if (!visible) throw new Error("Query no longer visible")
+            }
+          : undefined
+      )
+    } catch (error) {
+      if (error instanceof Error && error.message === "Query no longer visible") return placeholder
+      result = await failureResult(error)
     }
-    void stream().catch(error => api.Log(ctx, "Error", error instanceof Error ? error.message : String(error)))
-    return null
+    const completed = { ...result, Id: resultId }
+    await api.UpdateResult(ctx, completed)
+    return completed
   }
 
   try {
@@ -605,10 +673,17 @@ async function buildTranslationResult(
     Tails: [
       {
         Type: "text",
-        Text: fromHistory ? await t(ctx, "subtitle_history") : providerDisplayName(entry.provider)
+        Text: fromHistory ? await t(ctx, "subtitle_history") : entry.providerName
       }
     ],
-    Actions: await buildResultActions(ctx, entry.translatedText, sourceText, entry.provider, settings, { sourceLanguage: entry.sourceLanguage, targetLanguage: entry.targetLanguage })
+    Actions: await buildResultActions(
+      ctx,
+      entry.translatedText,
+      sourceText,
+      entry.provider,
+      { ...settings, sourceId: entry.configurationId },
+      { sourceLanguage: entry.sourceLanguage, targetLanguage: entry.targetLanguage }
+    )
   }
 }
 
@@ -645,6 +720,32 @@ export const plugin: Omit<Plugin, "query"> & { query: (ctx: Context, query: Tran
     await migrateVisibleProviders(ctx)
     lastProviderSelection = await api.GetSetting(ctx, PROVIDERS_SETTING_KEY)
     providerRefinementId = "translation_providers"
+    lastSourceCatalog = ""
+    const settings = await loadSettings(ctx)
+    await resolveVisibleProviders(ctx, settings)
+    // 宿主支持异步动态设置；旧 SDK 的回调类型尚未包含 Promise。
+    const dynamicApi = api as unknown as Omit<PublicAPI, "OnGetDynamicSetting"> & {
+      OnGetDynamicSetting(ctx: Context, callback: (ctx: Context, key: string) => Promise<{ Type: "select"; Value: object }>): Promise<void>
+    }
+    await dynamicApi.OnGetDynamicSetting(ctx, async (ctx, key) => {
+      const settings = await loadSettings(ctx)
+      const sources = translationSources(settings)
+      const isMulti = key === PROVIDERS_SETTING_KEY
+      return {
+        Type: "select",
+        DisabledInPlatforms: [],
+        IsPlatformSpecific: false,
+        Value: {
+          Key: key,
+          Label: isMulti ? "i18n:settings_visible_providers" : "i18n:settings_provider",
+          Tooltip: isMulti ? "i18n:settings_visible_providers_tip" : "i18n:settings_provider_tip",
+          DefaultValue: isMulti ? "" : "microsoft",
+          IsMulti: isMulti,
+          Options: sources.map(source => ({ Value: source.id, Label: source.name })),
+          Style: { Width: 640 }
+        }
+      }
+    })
     // Detect Wox's selected UI language through plugin i18n.
     try {
       woxLanguage = normalizeWoxLanguageProbe(await api.GetTranslation(ctx, "language_probe"))
@@ -662,9 +763,10 @@ export const plugin: Omit<Plugin, "query"> & { query: (ctx: Context, query: Tran
       return { Results: await buildHistoryResults(ctx, historySearch, settings), Refinements: [] }
     }
     // Selection contents are literal data, even when they begin with a command alias.
-    const parsed = query.Type === "selection" ? { provider: settings.defaultProvider, text: search, forcedProvider: false } : parseTranslationQuery(search, settings.defaultProvider)
+    const parsed =
+      query.Type === "selection" ? { provider: settings.defaultProvider, text: search, forcedProvider: false, configurationId: undefined } : parseTranslationQuery(search, settings.defaultProvider)
 
-    const selection = await resolveVisibleProviders(ctx, parsed.forcedProvider ? undefined : query.Refinements)
+    const selection = await resolveVisibleProviders(ctx, settings, parsed.forcedProvider ? undefined : query.Refinements)
     settings.visibleProviders = selection.providers
     // Explicit provider commands remain one-shot overrides; hiding the picker
     // avoids showing controls that would not affect those translation results.
@@ -676,14 +778,40 @@ export const plugin: Omit<Plugin, "query"> & { query: (ctx: Context, query: Tran
       return {
         Results: [
           await buildHelpResult(ctx, settings),
-          { Title: reset.Name, SubTitle: (await t(ctx, "settings_provider")) + ": " + providerDisplayName(settings.defaultProvider), Icon: PLUGIN_ICON, Score: 90, Actions: [reset] }
+          {
+            Title: reset.Name,
+            SubTitle:
+              (await t(ctx, "settings_provider")) + ": " + (translationSources(settings).find(source => source.id === settings.defaultSourceId)?.name || providerDisplayName(settings.defaultProvider)),
+            Icon: PLUGIN_ICON,
+            Score: 90,
+            Actions: [reset]
+          }
         ],
         Refinements: refinements
       }
     }
 
-    const providers = parsed.forcedProvider || settings.visibleProviders.length === 0 ? [parsed.provider] : settings.visibleProviders
-    const results = await Promise.all(providers.map((provider, index) => translateProviderResult(ctx, provider, parsed.text, settings, 100 - index, providers.length > 1, parsed, query)))
-    return { Results: results.filter((result): result is Result => result !== null), Refinements: refinements }
+    const available = [...translationSources(settings), { id: "deepl", provider: "deepl" as TranslationProvider, name: "DeepL" }]
+    let sources: TranslationSource[]
+    if (parsed.configurationId) {
+      sources = available.filter(source => source.id === parsed.configurationId)
+      if (sources.length === 0) return { Results: [{ Title: await t(ctx, "configuration_removed_title"), SubTitle: parsed.configurationId, Icon: PLUGIN_ICON }], Refinements: refinements }
+    } else if (parsed.forcedProvider) {
+      sources = available.filter(source => source.provider === parsed.provider)
+      if (sources.length === 0) sources = [{ id: parsed.provider, provider: parsed.provider, name: providerDisplayName(parsed.provider) }]
+    } else {
+      const ids = settings.visibleProviders.length ? settings.visibleProviders : [settings.defaultSourceId]
+      sources = available.filter(source => ids.includes(source.id))
+      if (sources.length === 0) return { Results: [{ Title: await t(ctx, "configuration_removed_title"), Icon: PLUGIN_ICON }], Refinements: refinements }
+    }
+    const results = await Promise.all(
+      sources.map(async (source, index) => {
+        const result = await translateProviderResult(ctx, source, parsed.text, settings, 100 - index, true, parsed, query)
+        // 历史命中、配置错误也立即显示，不被其他来源的网络耗时拖住。
+        await api.PushResults(ctx, query, [result])
+        return result
+      })
+    )
+    return { Results: results, Refinements: refinements }
   }
 }

@@ -4,7 +4,7 @@
   "Name": "i18n:plugin_name",
   "Description": "i18n:plugin_description",
   "Author": "stmluyuer",
-  "Version": "0.1.5",
+  "Version": "0.1.6",
   "MinWoxVersion": "2.4.8",
   "Runtime": "nodejs",
   "Website": "https://github.com/stmluyuer/Wox.Plugin.LuxTranslate",
@@ -21,11 +21,11 @@
       "settings_provider": "Default provider",
       "settings_provider_tip": "Used by normal queries such as tr hello when no providers are selected",
       "settings_visible_providers": "Translation providers (multiple)",
-      "settings_visible_providers_tip": "Choose providers to use together. This shares the selection with Filters in the translation window. Leave empty to use the default provider. Changes apply to the next query.",
+      "settings_visible_providers_tip": "Choose individual model configurations. Shared with Filters in the translation window. Each row uses its own credentials, endpoint and model. Leave empty to use the default source.",
       "settings_no_setup_provider_table": "No-setup providers",
       "settings_no_setup_provider_table_tip": "Providers that do not need manual API keys. Select them above or use Filters in the translation window.",
       "settings_llm_provider_table": "Large language model providers",
-      "settings_llm_provider_table_tip": "Configure OpenAI, Claude, DeepSeek, or custom OpenAI-compatible endpoints.",
+      "settings_llm_provider_table_tip": "Each row is an independently selectable model. Add multiple rows for the same provider with different names or models; each needs its own API key, Base URL and model.",
       "table_name": "Name",
       "table_provider": "Provider",
       "table_note": "Note",
@@ -110,7 +110,9 @@
       "refinement_provider_title": "Translation providers",
       "help_provider_selection": "Use Filters or Ctrl+F (Cmd+F on macOS) to select providers",
       "selected_providers": "Selected providers",
-      "action_use_default_provider": "Use default provider"
+      "action_use_default_provider": "Use default provider",
+      "configuration_required_title": "Configuration required",
+      "configuration_removed_title": "Model configuration is missing; choose a source in Settings"
     },
     "zh_CN": {
       "plugin_name": "LuxTranslate",
@@ -124,11 +126,11 @@
       "settings_provider": "默认翻译源",
       "settings_provider_tip": "未选择翻译源时，普通查询（如 tr hello）使用此来源",
       "settings_visible_providers": "翻译源（多选）",
-      "settings_visible_providers_tip": "选择要同时使用的翻译源，与翻译窗口的“筛选”共用同一份选择。留空时使用默认翻译源；修改后在下次查询时生效。",
+      "settings_visible_providers_tip": "按具体模型配置多选，与翻译窗口的筛选共用选择。每条配置使用自己的凭据、地址和模型；留空使用默认翻译源。",
       "settings_no_setup_provider_table": "免配置翻译源",
       "settings_no_setup_provider_table_tip": "不需要手动填写 API Key 的翻译源。可在上方多选框或翻译窗口的“筛选”中选择。",
       "settings_llm_provider_table": "大模型翻译源",
-      "settings_llm_provider_table_tip": "配置 OpenAI、Claude、DeepSeek 或通用 OpenAI 兼容接口。",
+      "settings_llm_provider_table_tip": "每一行都是独立可选的模型。可为同一供应商添加多行，用名称和模型区分；每行分别填写 API Key、Base URL 和模型。",
       "table_name": "名称",
       "table_provider": "翻译源",
       "table_note": "备注",
@@ -213,7 +215,9 @@
       "refinement_provider_title": "翻译源",
       "help_provider_selection": "点击“筛选”或按 Ctrl+F（macOS 为 Cmd+F）选择多个翻译源",
       "selected_providers": "已选翻译源",
-      "action_use_default_provider": "使用默认翻译源"
+      "action_use_default_provider": "使用默认翻译源",
+      "configuration_required_title": "需要配置",
+      "configuration_removed_title": "模型配置已不存在，请在设置中重新选择翻译源"
     }
   },
   "Entry": "index.js",
@@ -239,88 +243,15 @@
       }
     },
     {
-      "Type": "select",
+      "Type": "dynamic",
       "Value": {
-        "Key": "default_provider",
-        "Label": "i18n:settings_provider",
-        "Tooltip": "i18n:settings_provider_tip",
-        "DefaultValue": "microsoft",
-        "Options": [
-          {
-            "Label": "i18n:provider_microsoft",
-            "Value": "microsoft"
-          },
-          {
-            "Label": "i18n:provider_youdao",
-            "Value": "youdao"
-          },
-          {
-            "Label": "i18n:provider_caiyun",
-            "Value": "caiyun"
-          },
-          {
-            "Label": "i18n:provider_openai",
-            "Value": "openai"
-          },
-          {
-            "Label": "i18n:provider_claude",
-            "Value": "claude"
-          },
-          {
-            "Label": "i18n:provider_deepseek",
-            "Value": "deepseek"
-          },
-          {
-            "Label": "i18n:provider_custom_llm",
-            "Value": "llm_custom"
-          }
-        ],
-        "Style": {
-          "Width": 320
-        }
+        "Key": "default_provider"
       }
     },
     {
-      "Type": "select",
+      "Type": "dynamic",
       "Value": {
-        "Key": "visible_providers",
-        "Label": "i18n:settings_visible_providers",
-        "Tooltip": "i18n:settings_visible_providers_tip",
-        "DefaultValue": "",
-        "IsMulti": true,
-        "Options": [
-          {
-            "Label": "i18n:provider_microsoft",
-            "Value": "microsoft"
-          },
-          {
-            "Label": "i18n:provider_youdao",
-            "Value": "youdao"
-          },
-          {
-            "Label": "i18n:provider_caiyun",
-            "Value": "caiyun"
-          },
-          {
-            "Label": "i18n:provider_openai",
-            "Value": "openai"
-          },
-          {
-            "Label": "i18n:provider_claude",
-            "Value": "claude"
-          },
-          {
-            "Label": "i18n:provider_deepseek",
-            "Value": "deepseek"
-          },
-          {
-            "Label": "i18n:provider_custom_llm",
-            "Value": "llm_custom"
-          }
-        ],
-        "Style": {
-          "Width": 320
-        }
+        "Key": "visible_providers"
       }
     },
     {

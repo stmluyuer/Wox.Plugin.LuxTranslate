@@ -50,9 +50,9 @@ Notes:
 
 ## Installation
 
-Requires **Wox 2.4.8 or later**. Search for **LuxTranslate** in the Wox plugin store, or download `wox.plugin.luxtranslate.wox` from [GitHub Releases](https://github.com/stmluyuer/Wox.Plugin.LuxTranslate/releases/latest) and open it with Wox. The current release is [v0.1.5](https://github.com/stmluyuer/Wox.Plugin.LuxTranslate/releases/tag/v0.1.5).
+Requires **Wox 2.4.8 or later**. Search for **LuxTranslate** in the Wox plugin store, or download `wox.plugin.luxtranslate.wox` from [GitHub Releases](https://github.com/stmluyuer/Wox.Plugin.LuxTranslate/releases/latest) and open it with Wox. The current release is [v0.1.6](https://github.com/stmluyuer/Wox.Plugin.LuxTranslate/releases/tag/v0.1.6).
 
-To build from source (current version: 0.1.5):
+To build from source (current version: 0.1.6):
 
 ```bash
 git clone https://github.com/stmluyuer/Wox.Plugin.LuxTranslate.git
@@ -88,16 +88,18 @@ LuxTranslate works well with Wox's built-in quick query feature. Bind a hotkey t
 
 Release v0.1.4 selects multiple providers through Filters in the translation window (`Ctrl+F`, or `Cmd+F` on macOS).
 
-Version 0.1.5 adds settings-page multi-select, sharing the selection with the translation window. Requires Wox 2.4.8 or later, which includes the multi-select fix ([PR #4644](https://github.com/Wox-launcher/Wox/pull/4644)).
+Version 0.1.6 selects individual model configurations, sharing the selection between Settings and the translation window. Requires Wox 2.4.8 or later, which includes the multi-select fix ([PR #4644](https://github.com/Wox-launcher/Wox/pull/4644)).
 
 - `Default provider`: used by normal `tr <text>` queries when no providers are selected.
-- `Translation providers (multiple)` (0.1.5): the settings page and Filters in the translation window (`Ctrl+F`, or `Cmd+F` on macOS) share the same selection. Changes apply to the next query. Leave the selection empty to use the default provider, or choose “Use default provider” to clear it. Upgrading preserves the active filter selection; trial dropdown choices do not override it.
+- `Translation providers (multiple)`: Settings and Filters in the translation window (`Ctrl+F`, or `Cmd+F` on macOS) share the selection. Each model configuration shows its name and model, including multiple entries for the same provider. Leave empty to use the default source. Upgrading maps each old provider selection to its previously used first configuration, without enabling other models.
 - `No-setup providers`: manage Microsoft, Youdao, and Caiyun-style providers.
-- `Large language model providers`: configure API keys, base URLs, and model names for OpenAI, Claude, DeepSeek, or custom endpoints.
+- `Large language model providers`: each row is an independent OpenAI, Claude, DeepSeek, or custom configuration. Give each its own name, API key, base URL, and model. Multiple rows can use the same provider. Empty fields produce a configuration prompt; credentials are never borrowed from another row. Editing a row preserves its selection, while copying it creates an independent configuration.
 - `History limit`: keeps 10 entries by default.
 - `Show source and provider details`: controls whether previews include source text, provider, and direction details.
 
 Result actions include Translate again and switching providers; both preserve the original text and language direction. Selection queries treat the entire selection as literal text and preserve line breaks and indentation, including words such as `history`.
+
+Every selected source keeps a result row for loading, translation, missing configuration, or request failure. Streaming model rows remain visible alongside ordinary translations and history results. “Translate again” keeps the same model configuration. Provider commands such as `tr openai` or `tr deepseek` query all configurations of that provider.
 
 ## Development
 
