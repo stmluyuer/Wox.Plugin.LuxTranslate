@@ -18,6 +18,9 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 function createApi(settings: Record<string, string> = {}) {
   return {
+    OnGetDynamicSetting: jest.fn(async () => undefined),
+    PushResults: jest.fn(async () => true),
+    UpdateResult: jest.fn(async () => true),
     GetSetting: jest.fn(async (_ctx, key: string) => settings[key] ?? ""),
     SaveSetting: jest.fn(async () => undefined),
     GetTranslation: jest.fn(async (_ctx, key: string) => key),
@@ -111,7 +114,7 @@ describe("speech playback actions", () => {
     const playAction = findExecuteAction(result.Actions, "action_play_translation")
     await expect(playAction?.Action({} as never, { ContextData: {} } as never)).resolves.toBeUndefined()
 
-    expect(result.Title).toBe("你好")
+    expect(result.Title).toBe("Microsoft: 你好")
     expect(api.Log).toHaveBeenCalledWith(expect.anything(), "Error", expect.stringContaining("speech failed"))
   })
 })

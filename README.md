@@ -25,7 +25,7 @@ Wox v2.4.7 + LuxTranslate v0.1.4 的 10 秒演示：输入两句相关的英文�
 
 - 输入 `tr <text>` 翻译，按回车复制译文。
 - 用轻量识别判断中文/英文翻译方向。
-- 同时查看多个翻译源的结果。
+- 同时查看多个翻译源的结果；每个来源只占一行，完成或失败后原位更新，避免重复占位。
 - 逐步显示大模型返回的译文，并提示不完整的响应。
 - 缓存翻译历史；更换模型或接口后重新请求，也可用“重新翻译”跳过缓存。
 - 按需显示或隐藏预览中的原文、翻译源和语言方向。
@@ -54,9 +54,9 @@ Wox v2.4.7 + LuxTranslate v0.1.4 的 10 秒演示：输入两句相关的英文�
 
 ## 安装
 
-需要 **Wox 2.4.8 或更高版本**。在 Wox 的插件商店搜索 **LuxTranslate** 安装，也可以从 [GitHub Releases](https://github.com/stmluyuer/Wox.Plugin.LuxTranslate/releases/latest) 下载 `wox.plugin.luxtranslate.wox`，在 Wox 中打开安装。当前发布版为 [v0.1.7](https://github.com/stmluyuer/Wox.Plugin.LuxTranslate/releases/tag/v0.1.7)。
+需要 **Wox 2.4.8 或更高版本**。在 Wox 的插件商店搜索 **LuxTranslate** 安装，也可以从 [GitHub Releases](https://github.com/stmluyuer/Wox.Plugin.LuxTranslate/releases/latest) 下载 `wox.plugin.luxtranslate.wox`，在 Wox 中打开安装。当前发布版为 [v0.1.8](https://github.com/stmluyuer/Wox.Plugin.LuxTranslate/releases/tag/v0.1.8)。
 
-从源码构建（当前版本为 0.1.7）：
+从源码构建（当前版本为 0.1.8）：
 
 ```bash
 git clone https://github.com/stmluyuer/Wox.Plugin.LuxTranslate.git

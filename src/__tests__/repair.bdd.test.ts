@@ -39,10 +39,24 @@ function rows(model = "model-A", baseUrl = "https://example.invalid/v1") {
 }
 
 async function setup(overrides: Record<string, string> = {}) {
-  const settings: Record<string, string> = { request_timeout_ms: "300", ...overrides }
+  const settings: Record<string, string> = {
+    request_timeout_ms: "300",
+    llm_provider_table: JSON.stringify(
+      ["openai", "claude", "deepseek", "llm_custom"].map(provider => ({
+        id: "model_" + provider,
+        provider,
+        name: provider,
+        apiKey: "offline-test",
+        baseUrl: "https://example.invalid/v1",
+        model: "test-model"
+      }))
+    ),
+    ...overrides
+  }
   const pushed: Result[] = []
   const updates: Result[] = []
   const api = {
+    OnGetDynamicSetting: jest.fn<Promise<void>, [Context, (ctx: Context, key: string) => Promise<unknown>]>(async () => undefined),
     GetSetting: jest.fn(async (_ctx, key: string) => settings[key] ?? ""),
     SaveSetting: jest.fn(async (_ctx, key: string, value: string) => {
       await new Promise(resolve => setTimeout(resolve, 1))
@@ -75,7 +89,7 @@ async function setup(overrides: Record<string, string> = {}) {
       Refinements: refinements
     } as Query & { Refinements?: Record<string, string> })
     const result = raw as unknown as Result[] | { Results: Result[]; Refinements?: Array<{ Id: string; Type: string; DefaultValue: string[]; Options: Array<{ Value: string }> }> }
-    return Array.isArray(result) ? { Results: [...pushed, ...result], Refinements: [] } : { ...result, Results: [...pushed, ...result.Results], Refinements: result.Refinements || [] }
+    return Array.isArray(result) ? { Results: result, Refinements: [] } : { ...result, Refinements: result.Refinements || [] }
   }
   return {
     api,
@@ -120,8 +134,8 @@ describe("LuxTranslate 翻译与配置回归场景", () => {
     const response = await h.response("")
     // Then 只提供一个多选筛选入口且不发出翻译请求
     expect(response.Refinements).toHaveLength(1)
-    expect(response.Refinements[0]).toMatchObject({ Id: "translation_providers", Type: "multiSelect", DefaultValue: ["deepseek"] })
-    expect(response.Refinements[0].Options.map(option => option.Value)).toEqual(["microsoft", "youdao", "caiyun", "openai", "claude", "deepseek", "llm_custom"])
+    expect(response.Refinements[0]).toMatchObject({ Id: expect.stringMatching(/^translation_providers_/), Type: "multiSelect", DefaultValue: ["model_deepseek"] })
+    expect(response.Refinements[0].Options.map(option => option.Value)).toEqual(["microsoft", "youdao", "caiyun", "model_openai", "model_claude", "model_deepseek", "model_llm_custom"])
     expect(global.fetch).not.toHaveBeenCalled()
   })
 
@@ -129,7 +143,8 @@ describe("LuxTranslate 翻译与配置回归场景", () => {
     // Given 用户在无原文的翻译窗口中配置来源
     const h = await setup({ visible_provider_deepseek: "true" })
     // When 在多选筛选中选中 Microsoft 和有道再重新加载插件
-    await h.response("", false, { translation_providers: "microsoft,youdao" })
+    const id = (await h.response("")).Refinements[0].Id
+    await h.response("", false, { [id]: "microsoft,youdao" })
     await h.restart()
     const response = await h.response("")
     // Then 新选择保留而旧的 DeepSeek 不再启用
@@ -142,7 +157,8 @@ describe("LuxTranslate 翻译与配置回归场景", () => {
     const h = await setup({ visible_providers: "microsoft,youdao" })
     global.fetch = jest.fn(async () => json({ translateResult: [[{ tgt: "您好" }]] })) as typeof fetch
     // When 在多选入口取消 Microsoft 后翻译
-    const results = await h.query("hello", false, { translation_providers: "youdao" })
+    const id = (await h.response("")).Refinements[0].Id
+    const results = await h.query("hello", false, { [id]: "youdao" })
     // Then 只请求有道且 Microsoft 偏好已关闭
     expect(results).toHaveLength(1)
     expect(global.fetch).toHaveBeenCalledTimes(1)
@@ -175,14 +191,15 @@ describe("LuxTranslate 翻译与配置回归场景", () => {
     // Then 只请求 Microsoft 且不修改保存的 DeepSeek 选择
     expect(response.Refinements).toEqual([])
     expect(global.fetch).toHaveBeenCalledTimes(1)
-    expect(h.settings.visible_providers).toBe("deepseek")
+    expect(h.settings.visible_providers).toBe("model_deepseek")
   })
 
   test("连续快速选择时保存最后一次完整选择", async () => {
     // Given 用户连续修改同一个来源筛选
     const h = await setup()
     // When 两次修改的保存过程发生交错
-    await Promise.all([h.response("", false, { translation_providers: "microsoft,youdao" }), h.response("", false, { translation_providers: "youdao" })])
+    const id = (await h.response("")).Refinements[0].Id
+    await Promise.all([h.response("", false, { [id]: "microsoft,youdao" }), h.response("", false, { [id]: "youdao" })])
     // Then 最后一次选择完整保存
     const response = await h.response("")
     expect(response.Refinements[0].DefaultValue).toEqual(["youdao"])
@@ -200,7 +217,9 @@ describe("LuxTranslate 翻译与配置回归场景", () => {
     expect(global.fetch).toHaveBeenCalledTimes(2)
     const manifest = JSON.parse(readFileSync(join(__dirname, "../../plugin.json"), "utf8"))
     const fields = manifest.SettingDefinitions as Array<{ Type: string; Value: { Key?: string } }>
-    expect(fields.some(item => item.Type === "select" && item.Value.Key === "visible_providers")).toBe(true)
+    expect(fields.some(item => item.Type === "dynamic" && item.Value.Key === "visible_providers")).toBe(true)
+    const definition = await h.api.OnGetDynamicSetting.mock.calls[0][1](ctx, "visible_providers")
+    expect(definition).toMatchObject({ Type: "select", Value: { Key: "visible_providers", IsMulti: true } })
     expect(fields.filter(item => item.Type === "checkbox" && item.Value.Key?.startsWith("visible_provider_"))).toHaveLength(0)
   })
 

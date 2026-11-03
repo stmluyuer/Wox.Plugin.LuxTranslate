@@ -506,8 +506,8 @@ async function translateProviderResult(
   score: number,
   includeProviderInTitle: boolean,
   languageOverrides?: { sourceLanguage?: LanguageCode; targetLanguage?: LanguageCode; forceRefresh?: boolean },
-  query?: Query
-): Promise<Result> {
+  resultId?: string
+): Promise<Result | undefined> {
   const provider = source.provider
   const providerSettings = settingsForSource(settings, source)
 
@@ -599,49 +599,24 @@ async function translateProviderResult(
     }
   }
 
-  if (query) {
-    const resultId = `lux-tr-${randomUUID()}`
-    const placeholder: Result = {
-      Id: resultId,
-      Title: `${source.name}: ${await t(ctx, "translating_title")}`,
-      SubTitle: sourceText,
-      Icon: PLUGIN_ICON,
-      Score: score,
-      Actions: [],
-      Preview: { PreviewType: "markdown", PreviewData: await t(ctx, "translating_title"), PreviewProperties: {} }
-    }
-    // 推送只负责提前显示；查询必须等待翻译结束并返回同一个 ID，
-    // 否则宿主的正式结果快照会删除这些流式结果。
-    if (!(await api.PushResults(ctx, query, [placeholder]))) return placeholder
-    let result: Result
-    try {
-      let lastUpdate = 0
-      result = await finishTranslation(
-        isLanguageModelProvider(provider)
-          ? async text => {
-              if (lastUpdate !== 0 && Date.now() - lastUpdate < 80) return
-              lastUpdate = Date.now()
-              const visible = await api.UpdateResult(ctx, {
-                Id: resultId,
-                Title: `${source.name}: ${collapseExtraBlankLines(text)}`,
-                Preview: { PreviewType: "markdown", PreviewData: collapseExtraBlankLines(text), PreviewProperties: {} }
-              })
-              if (!visible) throw new Error("Query no longer visible")
-            }
-          : undefined
-      )
-    } catch (error) {
-      if (error instanceof Error && error.message === "Query no longer visible") return placeholder
-      result = await failureResult(error)
-    }
-    const completed = { ...result, Id: resultId }
-    await api.UpdateResult(ctx, completed)
-    return completed
-  }
-
   try {
-    return await finishTranslation()
+    let lastUpdate = 0
+    return await finishTranslation(
+      resultId && isLanguageModelProvider(provider)
+        ? async text => {
+            if (lastUpdate !== 0 && Date.now() - lastUpdate < 80) return
+            lastUpdate = Date.now()
+            const visible = await api.UpdateResult(ctx, {
+              Id: resultId,
+              Title: `${source.name}: ${collapseExtraBlankLines(text)}`,
+              Preview: { PreviewType: "markdown", PreviewData: collapseExtraBlankLines(text), PreviewProperties: {} }
+            })
+            if (!visible) throw new Error("Query no longer visible")
+          }
+        : undefined
+    )
   } catch (error) {
+    if (error instanceof Error && error.message === "Query no longer visible") return undefined
     return failureResult(error)
   }
 }
@@ -807,14 +782,31 @@ export const plugin: Omit<Plugin, "query"> & { query: (ctx: Context, query: Tran
       sources = available.filter(source => ids.includes(source.id))
       if (sources.length === 0) return { Results: [{ Title: await t(ctx, "configuration_removed_title"), Icon: PLUGIN_ICON }], Refinements: refinements }
     }
+    const pendingTitle = await t(ctx, "translating_title")
+    const placeholders: Result[] = sources.map((source, index) => ({
+      Id: `lux-tr-${randomUUID()}`,
+      Title: `${source.name}: ${pendingTitle}`,
+      SubTitle: parsed.text,
+      Icon: PLUGIN_ICON,
+      Score: 100 - index,
+      Actions: [],
+      Preview: { PreviewType: "markdown", PreviewData: pendingTitle, PreviewProperties: {} }
+    }))
+    // Wox 2.4.9 的推送会携带当前全部结果，但界面按追加处理。
+    // 一次注册全部来源，之后只更新原行，避免旧占位被快照反复追加。
+    if (!(await api.PushResults(ctx, query, placeholders))) return { Results: [], Refinements: refinements }
     const results = await Promise.all(
-      sources.map(async (source, index) => {
-        const result = await translateProviderResult(ctx, source, parsed.text, settings, 100 - index, true, parsed, query)
-        // 历史命中、配置错误也立即显示，不被其他来源的网络耗时拖住。
-        await api.PushResults(ctx, query, [result])
-        return result
+      sources.map(async (source, index): Promise<Result | undefined> => {
+        const resultId = placeholders[index].Id as string
+        const result = await translateProviderResult(ctx, source, parsed.text, settings, 100 - index, true, parsed, resultId)
+        if (!result) return undefined
+        const completed = { ...result, Id: resultId }
+        // 缓存命中和配置错误也更新对应原行，不等待其他模型完成。
+        await api.UpdateResult(ctx, completed)
+        return completed
       })
     )
-    return { Results: results, Refinements: refinements }
+    // 正式返回保留同一组 ID，宿主最终快照才会保留已完成的流式结果。
+    return { Results: results.filter((result): result is Result => result !== undefined), Refinements: refinements }
   }
 }

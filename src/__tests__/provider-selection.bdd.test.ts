@@ -9,6 +9,9 @@ const ctx = {} as Context
 async function setup(initial: Record<string, string> = {}) {
   const settings = { ...initial }
   const api = {
+    OnGetDynamicSetting: jest.fn<Promise<void>, [Context, (ctx: Context, key: string) => Promise<unknown>]>(async () => undefined),
+    PushResults: jest.fn(async () => true),
+    UpdateResult: jest.fn(async () => true),
     GetSetting: jest.fn(async (_ctx: Context, key: string) => settings[key] ?? ""),
     SaveSetting: jest.fn(async (_ctx: Context, key: string, value: string) => {
       await Promise.resolve()
@@ -43,11 +46,13 @@ test("uses saved provider selection for translation and filters", async () => {
   expect(manifest.SettingDefinitions).toEqual(
     expect.arrayContaining([
       expect.objectContaining({
-        Type: "select",
-        Value: expect.objectContaining({ Key: "visible_providers", IsMulti: true })
+        Type: "dynamic",
+        Value: expect.objectContaining({ Key: "visible_providers" })
       })
     ])
   )
+  const definition = await h.api.OnGetDynamicSetting.mock.calls[0][1](ctx, "visible_providers")
+  expect(definition).toMatchObject({ Type: "select", Value: { Key: "visible_providers", IsMulti: true } })
   expect(JSON.stringify(manifest.SettingDefinitions)).not.toContain("visible_providers_dropdown_trial")
 })
 

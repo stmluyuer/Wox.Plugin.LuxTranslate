@@ -25,7 +25,7 @@ The preview displays the Chinese translation, full source text, and provider.
 
 - Quick translation with `tr <text>` and Enter-to-copy result actions.
 - Lightweight Chinese/English direction detection.
-- Multiple providers displayed in the same query.
+- Multiple providers displayed in the same query, with one row per source updated in place on completion or failure.
 - Streaming LLM translations, with a clear warning for incomplete output.
 - Translation history cache that changes with the model or endpoint, plus a Translate again action to bypass it.
 - Optional preview details for source text, provider, and language direction.
@@ -54,9 +54,9 @@ Notes:
 
 ## Installation
 
-Requires **Wox 2.4.8 or later**. Search for **LuxTranslate** in the Wox plugin store, or download `wox.plugin.luxtranslate.wox` from [GitHub Releases](https://github.com/stmluyuer/Wox.Plugin.LuxTranslate/releases/latest) and open it with Wox. The current release is [v0.1.7](https://github.com/stmluyuer/Wox.Plugin.LuxTranslate/releases/tag/v0.1.7).
+Requires **Wox 2.4.8 or later**. Search for **LuxTranslate** in the Wox plugin store, or download `wox.plugin.luxtranslate.wox` from [GitHub Releases](https://github.com/stmluyuer/Wox.Plugin.LuxTranslate/releases/latest) and open it with Wox. The current release is [v0.1.8](https://github.com/stmluyuer/Wox.Plugin.LuxTranslate/releases/tag/v0.1.8).
 
-To build from source (current version: 0.1.7):
+To build from source (current version: 0.1.8):
 
 ```bash
 git clone https://github.com/stmluyuer/Wox.Plugin.LuxTranslate.git
