@@ -50,9 +50,9 @@ Wox v2.4.7 + LuxTranslate v0.1.4 的 10 秒演示：输入两句相关的英文�
 
 ## 安装
 
-需要 **Wox 2.0.4 或更高版本**。在 Wox 的插件商店搜索 **LuxTranslate** 安装，也可以从 [GitHub Releases](https://github.com/stmluyuer/Wox.Plugin.LuxTranslate/releases/latest) 下载 `wox.plugin.luxtranslate.wox`，在 Wox 中打开安装。当前发布版为 [v0.1.4](https://github.com/stmluyuer/Wox.Plugin.LuxTranslate/releases/tag/v0.1.4)。
+需要 **Wox 2.4.8 或更高版本**。在 Wox 的插件商店搜索 **LuxTranslate** 安装，也可以从 [GitHub Releases](https://github.com/stmluyuer/Wox.Plugin.LuxTranslate/releases/latest) 下载 `wox.plugin.luxtranslate.wox`，在 Wox 中打开安装。当前发布版为 [v0.1.5](https://github.com/stmluyuer/Wox.Plugin.LuxTranslate/releases/tag/v0.1.5)。
 
-从源码构建（当前 `main` 分支版本为 0.1.5，设置页多选的 Wox 依赖见下方配置说明）：
+从源码构建（当前版本为 0.1.5）：
 
 ```bash
 git clone https://github.com/stmluyuer/Wox.Plugin.LuxTranslate.git
@@ -88,10 +88,10 @@ pnpm build
 
 发布版 v0.1.4 通过翻译窗口的“筛选”（`Ctrl+F`，macOS 为 `Cmd+F`）选择多个翻译源。
 
-当前 `main` 分支的 0.1.5 开发版本新增设置页多选，与翻译窗口共用选择；设置页功能依赖 Wox 的多选修复（[PR #4644](https://github.com/Wox-launcher/Wox/pull/4644)，已合并）。使用时需确认 Wox 构建包含该修复，否则继续通过翻译窗口的“筛选”选择来源。0.1.5 发布前仍需将最低 Wox 版本调整为实际包含修复的发布版本。
+0.1.5 新增设置页多选，与翻译窗口共用选择。需要 Wox 2.4.8 或更高版本，该版本已包含多选修复（[PR #4644](https://github.com/Wox-launcher/Wox/pull/4644)）。
 
 - `默认翻译源`：没有选择翻译源时，普通 `tr <text>` 查询使用的来源。
-- `翻译源（多选）`（0.1.5 开发版本）：设置页和翻译窗口的“筛选”（`Ctrl+F`，macOS 为 `Cmd+F`）共用同一份选择，修改后在下次查询时生效。留空时使用默认翻译源，也可通过“使用默认翻译源”操作清空选择。升级会保留原先实际使用的筛选选择，试用框里的选项不会覆盖它。
+- `翻译源（多选）`（0.1.5）：设置页和翻译窗口的“筛选”（`Ctrl+F`，macOS 为 `Cmd+F`）共用同一份选择，修改后在下次查询时生效。留空时使用默认翻译源，也可通过“使用默认翻译源”操作清空选择。升级会保留原先实际使用的筛选选择，试用框里的选项不会覆盖它。
 - `免配置翻译源`：管理 Microsoft、有道、彩云等无需手动 API Key 的翻译源。
 - `大模型翻译源`：配置 OpenAI、Claude、DeepSeek 或通用大模型的 API Key、Base URL 和模型名。
 - `历史记录条数`：默认保留 10 条翻译历史。
