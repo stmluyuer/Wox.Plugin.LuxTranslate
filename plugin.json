@@ -13,7 +13,6 @@
       "plugin_name": "LuxTranslate",
       "plugin_description": "Beta: translate text in Wox with no-setup providers and large language models. Not fully tested; please report serious bugs and I will fix them ASAP.",
       "language_probe": "en",
-      "settings_group_basic": "Basic behavior",
       "settings_group_no_setup": "No-setup translation",
       "settings_group_llm": "Large language models",
       "settings_group_display": "Display and history",
@@ -123,7 +122,6 @@
       "plugin_name": "LuxTranslate",
       "plugin_description": "测试版：在 Wox 中使用免配置翻译源和大模型翻译文本。尚未充分测试；如有严重 bug 我先道歉，欢迎反馈，我会尽快修复。",
       "language_probe": "zh",
-      "settings_group_basic": "基础行为",
       "settings_group_no_setup": "免配置翻译",
       "settings_group_llm": "大模型翻译",
       "settings_group_display": "显示与历史",
@@ -245,13 +243,6 @@
     }
   ],
   "SettingDefinitions": [
-    {
-      "Type": "head",
-      "Value": {
-        "Content": "i18n:settings_group_basic",
-        "Style": {}
-      }
-    },
     {
       "Type": "dynamic",
       "Value": {
